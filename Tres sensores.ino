@@ -1,5 +1,134 @@
 #include <SPI.h>
 
+// Definir pines SPI compartidos
+#define SCK_PIN   18
+#define MOSI_PIN  23
+#define MISO_PIN  19
+
+// Definir pines CS para cada sensor
+#define CS_SENSOR1  26
+#define CS_SENSOR2  14 
+#define CS_SENSOR3  25
+
+#define POWER_CTL   0x2D
+#define DATA_FORMAT 0x31
+#define DATAX0      0x32
+
+int csPins[] = {CS_SENSOR1, CS_SENSOR2, CS_SENSOR3};
+const int NUM_SENSORES = 3;
+
+void setup() {
+  Serial.begin(115200);
+  delay(2000);
+  
+  Serial.println("=========================================");
+  Serial.println("   CONFIGURACIÓN CON PULL-UP EN MISO");
+  Serial.println("=========================================");
+  
+  // IMPORTANTE: Configurar MISO con pull-up interno
+  pinMode(MISO_PIN, INPUT_PULLUP);  // ¡Esto es clave!
+  
+  // Configurar pines CS
+  for(int i = 0; i < NUM_SENSORES; i++) {
+    pinMode(csPins[i], OUTPUT);
+    digitalWrite(csPins[i], HIGH);
+  }
+  
+  // Inicializar SPI
+  SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, -1);
+  SPI.setDataMode(SPI_MODE3);
+  SPI.setFrequency(1000000);  // Reducir velocidad para más estabilidad
+  delay(10);
+  
+  // Verificar sensores con reintentos
+  for(int i = 0; i < NUM_SENSORES; i++) {
+    Serial.printf("Sensor %d (GPIO%d): ", i+1, csPins[i]);
+    
+    // Intentar leer varias veces
+    uint8_t id = 0;
+    for(int intento = 0; intento < 3; intento++) {
+      id = readRegister(csPins[i], 0x00);
+      if(id == 0xE5) break;
+      delay(10);
+    }
+    
+    Serial.printf("ID: 0x%02X %s\n", id, (id == 0xE5) ? "✅" : "❌");
+    
+    if(id == 0xE5) {
+      writeRegister(csPins[i], DATA_FORMAT, 0x0B);
+      writeRegister(csPins[i], POWER_CTL, 0x08);
+      delay(10);
+    }
+  }
+  
+  Serial.println("=========================================\n");
+}
+
+void loop() {
+  // Pequeño delay entre lecturas de diferentes sensores
+  for(int i = 0; i < NUM_SENSORES; i++) {
+    // Verificar ID primero
+    uint8_t id = readRegister(csPins[i], 0x00);
+    if(id != 0xE5) {
+      Serial.printf("S%d: ERROR (ID:0x%02X)", i+1, id);
+      if(i < NUM_SENSORES-1) Serial.print(" | ");
+      continue;
+    }
+    
+    int16_t x, y, z;
+    leerAceleracion(csPins[i], x, y, z);
+    
+    // Mostrar datos
+    Serial.printf("S%d: X=%5d Y=%5d Z=%5d", i+1, x, y, z);
+    if(i < NUM_SENSORES-1) Serial.print(" | ");
+    
+    // Pequeña pausa entre sensores para estabilidad
+    delay(2);
+  }
+  Serial.println();
+  delay(500);
+}
+
+void writeRegister(int csPin, char reg, char value) {
+  digitalWrite(csPin, LOW);
+  delayMicroseconds(5);
+  SPI.transfer(reg);
+  SPI.transfer(value);
+  digitalWrite(csPin, HIGH);
+  delayMicroseconds(5);
+}
+
+uint8_t readRegister(int csPin, char reg) {
+  char address = 0x80 | reg;
+  digitalWrite(csPin, LOW);
+  delayMicroseconds(5);
+  SPI.transfer(address);
+  uint8_t result = SPI.transfer(0x00);
+  digitalWrite(csPin, HIGH);
+  delayMicroseconds(5);
+  return result;
+}
+
+void leerAceleracion(int csPin, int16_t &x, int16_t &y, int16_t &z) {
+  unsigned char values[6];
+  char address = 0x80 | 0x40 | DATAX0;
+  
+  digitalWrite(csPin, LOW);
+  delayMicroseconds(5);
+  SPI.transfer(address);
+  
+  for(int i = 0; i < 6; i++) {
+    values[i] = SPI.transfer(0x00);
+  }
+  
+  digitalWrite(csPin, HIGH);
+  delayMicroseconds(5);
+  
+  x = (int16_t)((values[1] << 8) | values[0]);
+  y = (int16_t)((values[3] << 8) | values[2]);
+  z = (int16_t)((values[5] << 8) | values[4]);
+}#include <SPI.h>
+
 // Pines SPI
 #define SCK_PIN   18
 #define MOSI_PIN  23
